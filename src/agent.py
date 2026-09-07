@@ -279,7 +279,58 @@ def run_planning_agent(
         A PlanRun. This function does not raise for ordinary failures -- it
         reports them through stopped_reason and final_answer.
     """
-    raise NotImplementedError("TODO A2: implement the plan/act/observe/replan loop")
+    if not isinstance(goal, str) or not goal.strip():
+        return _stopped(goal, [], "error", "Please type a goal first.")
+    goal = goal.strip()
+
+    the_plan = plan if plan is not None else write_plan(goal, max_steps=max_steps)
+    if not the_plan:
+        return _stopped(
+            goal, [], "error",
+            "Sorry, I couldn't draft a plan for that goal -- try rephrasing it.",
+        )
+
+    if approve_plan is not None and not approve_plan(the_plan):
+        return _stopped(goal, the_plan, "cancelled", "Cancelled before any tool ran.")
+
+    recorder = _RunRecorder(goal=goal, initial_plan=the_plan, on_step_done=on_step_done)
+    queue = list(the_plan)
+    prior_summary = ""
+
+    while queue:
+        step = queue.pop(0)
+        result = execute_step(
+            step, goal, prior_summary=prior_summary, max_tool_calls=per_step_tool_calls
+        )
+        recorder.record_step(result)
+
+        if result.observation:
+            line = f"step {step.n}: {result.observation}"
+            prior_summary = f"{prior_summary}\n{line}" if prior_summary else line
+
+        if (
+            result.observation.startswith("surprise")
+            and queue
+            and recorder.revision_count < max_revisions
+        ):
+            before = list(queue)
+            done_pairs = [(r.step, r.observation) for r in recorder.step_results]
+            revised = revise_plan(
+                goal=goal,
+                done=done_pairs,
+                remaining=queue,
+                observation=result.observation,
+                max_steps=max_steps,
+            )
+            recorder.record_revision(
+                after_step=step.n,
+                trigger=result.observation,
+                before=before,
+                after=revised,
+            )
+            queue = list(revised)
+
+    return recorder.finish("done")
 
 
 # ===========================================================================

@@ -316,29 +316,44 @@ def _render_run(goal: str, run: PlanRun) -> None:
     if run.initial_plan:
         st.markdown(_plan_html(run.initial_plan), unsafe_allow_html=True)
 
-    # ===================================================================
-    # TODO A3 -- render the step trace and any mid-run replans
-    # ===================================================================
-    #
-    # A reviewer looking at this page must be able to answer, without opening
-    # a terminal: what did the agent do, in what order, what did each step
-    # conclude, which tools ran with which arguments, and -- if the plan
-    # changed mid-run -- when it changed and what triggered it.
-    #
-    # `run.step_results` holds one StepResult per executed step.
-    # `run.revisions` holds one dict per replan, with keys "after_step",
-    # "trigger", "before" and "after".
-    #
-    # _step_card_html() and _tool_cards_html() are written for you just above
-    # and return HTML strings. Render HTML with
-    # st.markdown(..., unsafe_allow_html=True), and put per-step detail behind
-    # st.expander(...) so the page stays scannable.
-    #
-    # Escape anything that came from the model or the web before it reaches
-    # the page. Delete the caption below when you are done.
-    st.caption("TODO A3: render the step trace and revision panel here.")
-    # END TODO A3
-    # ===================================================================
+    # Step trace, with any mid-run replan surfaced right after the step that
+    # triggered it.
+    revisions_after: dict[int, list[dict[str, Any]]] = {}
+    for rev in run.revisions:
+        revisions_after.setdefault(rev["after_step"], []).append(rev)
+
+    for result in run.step_results:
+        st.markdown(_step_card_html(result), unsafe_allow_html=True)
+        if result.tool_calls:
+            with st.expander(f"step {result.step.n}: {len(result.tool_calls)} tool call(s)"):
+                st.markdown(_tool_cards_html(result), unsafe_allow_html=True)
+
+        for rev in revisions_after.get(result.step.n, []):
+            st.markdown(
+                f"""
+<div class="revision-card">
+  <strong>Plan revised after step {rev['after_step']}</strong>
+  &mdash; triggered by: {_html_escape(rev['trigger'])}
+</div>
+""",
+                unsafe_allow_html=True,
+            )
+            with st.expander(f"What changed after step {rev['after_step']}"):
+                before_items = "".join(
+                    f'<li>{_html_escape(s["goal"])}'
+                    f'<span class="hint">{_html_escape(s["tool_hint"])}</span></li>'
+                    for s in rev["before"]
+                )
+                after_items = "".join(
+                    f'<li>{_html_escape(s["goal"])}'
+                    f'<span class="hint">{_html_escape(s["tool_hint"])}</span></li>'
+                    for s in rev["after"]
+                )
+                st.markdown(
+                    f"<div class='plan-card'><h4>Before</h4><ol>{before_items}</ol></div>"
+                    f"<div class='plan-card'><h4>After</h4><ol>{after_items}</ol></div>",
+                    unsafe_allow_html=True,
+                )
 
     # Cover image
     if run.image_url:
